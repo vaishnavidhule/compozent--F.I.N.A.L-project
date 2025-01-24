@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:flutter_rating_bar/flutter_rating_bar.dart';
@@ -27,157 +29,203 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Image Gallery with Ratings',
       theme: ThemeData(primarySwatch: Colors.blue),
       darkTheme: ThemeData.dark(),
       themeMode: _themeMode,
-      home: ImageGalleryScreen(onThemeChanged: changeTheme),
+      home: ImageGalleryScreen(changeTheme: changeTheme),
     );
   }
 }
 
 class ImageGalleryScreen extends StatefulWidget {
-  final Function(ThemeMode) onThemeChanged;
+  final Function(ThemeMode) changeTheme;
 
-  const ImageGalleryScreen({super.key, required this.onThemeChanged});
+  const ImageGalleryScreen({super.key, required this.changeTheme});
 
   @override
-  _ImageGalleryScreenState createState() => _ImageGalleryScreenState();       
+  _ImageGalleryScreenState createState() => _ImageGalleryScreenState();
 }
 
 class _ImageGalleryScreenState extends State<ImageGalleryScreen> {
-  final List<Map<String, dynamic>> images = [
-     {'url': 'https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb', 'rating': 0.0},
-    {'url': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSDo890dsxpB5UCLQFdVBWmK4qVxTrsrLEEUg&s', 'rating': 0.0},
-    {'url': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRNgRezLFB9BzDht2sgUpL9p-pwBi8W0m3Mag&s', 'rating': 0.0},
-    {'url': 'https://images.unsplash.com/photo-1567306226416-28f0efdc88ce', 'rating': 0.0},
-    {'url': 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSDo890dsxpB5UCLQFdVBWmK4qVxTrsrLEEUg&s', 'rating': 0.0},
-  ];
-
-  double _selectedRating = 0.0;
+  List<Map<String, dynamic>> images = [];
+  List<Map<String, dynamic>> filteredImages = [];
+  bool isLoading = true;
+  String searchText = '';
+  double ratingFilter = 0.0;
 
   @override
-  Widget build(BuildContext context) {
-    final filteredImages = images
-        .where((image) => image['rating'] >= _selectedRating)
-        .toList();
+  void initState() {
+    super.initState();
+    fetchImages();
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Image Gallery with Ratings'),
-        actions: [
-          PopupMenuButton<ThemeMode>(
-            onSelected: widget.onThemeChanged,
-            itemBuilder: (context) => [
-              const PopupMenuItem(
-                value: ThemeMode.light,
-                child: Text('Light Theme'),
-              ),
-              const PopupMenuItem(
-                value: ThemeMode.dark,
-                child: Text('Dark Theme'),
-              ),
-              const PopupMenuItem(
-                value: ThemeMode.system,
-                child: Text('System Default'),
-              ),
-            ],
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(10.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Filter by Rating:',
-                  style: TextStyle(fontSize: 16),
-                ),
-                DropdownButton<double>(
-                  value: _selectedRating,
-                  items: [
-                    DropdownMenuItem(value: 0.0, child: Text('All')),
-                    DropdownMenuItem(value: 1.0, child: Text('1.0+')),
-                    DropdownMenuItem(value: 2.0, child: Text('2.0+')),
-                    DropdownMenuItem(value: 3.0, child: Text('3.0+')),
-                    DropdownMenuItem(value: 4.0, child: Text('4.0+')),
-                    DropdownMenuItem(value: 5.0, child: Text('5.0')),
-                  ],
-                  onChanged: (value) {
-                    setState(() {
-                      _selectedRating = value ?? 0.0;
-                    });
-                  },
-                ),
-              ],
+  Future<void> fetchImages({String query = ''}) async {
+  const accessKey = 'Jnv03a_Z5loWn58V1I2ICr24g7N7dIN_M7Zi3xKCNlI';  //  Unsplash API Access Key here
+  final url = query.isEmpty
+      ? 'https://api.unsplash.com/photos?per_page=30&client_id=$accessKey'
+      : 'https://api.unsplash.com/search/photos?query=$query&per_page=30&client_id=$accessKey';
+
+  try {
+    final response = await http.get(Uri.parse(url));
+    if (response.statusCode == 200) {
+      final List<dynamic> data = query.isEmpty
+          ? json.decode(response.body)
+          : json.decode(response.body)['results'];
+
+      setState(() {
+        images = data
+            .map((e) => {
+                  'url': e['urls']['small'],
+                  'title': e['alt_description'] ?? 'Untitled',
+                  'rating': 0.0,
+                })
+            .toList();
+        filteredImages = images;
+        isLoading = false;
+      });
+    } else {
+      throw Exception('Failed to load images');
+    }
+  } catch (e) {
+    setState(() {
+      isLoading = false;
+    });
+    rethrow;
+  }
+}
+
+
+  void filterImages() {
+    setState(() {
+      filteredImages = images
+          .where((image) =>
+              image['rating'] >= ratingFilter &&
+              (searchText.isEmpty ||
+                  image['title'].toLowerCase().contains(searchText.toLowerCase())))
+          .toList();
+    });
+  }
+
+  @override
+  @override
+Widget build(BuildContext context) {
+  return Scaffold(
+    appBar: AppBar(
+      title: const Text('Image Gallery'),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.brightness_6),
+          onPressed: () {
+            final theme = Theme.of(context).brightness == Brightness.light
+                ? ThemeMode.dark
+                : ThemeMode.light;
+            widget.changeTheme(theme);
+          },
+        ),
+      ],
+    ),
+    body: Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(8.0),
+          child: TextField(
+            decoration: const InputDecoration(
+              labelText: 'Search',
+              prefixIcon: Icon(Icons.search),
+              border: OutlineInputBorder(),
             ),
+            onChanged: (value) {
+              setState(() {
+                searchText = value;
+              });
+              filterImages();
+            },
           ),
-          Expanded(
-            child: GridView.builder(
-              padding: const EdgeInsets.all(10),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                crossAxisSpacing: 10,
-                mainAxisSpacing: 10,
-              ),
-              itemCount: filteredImages.length,
-              itemBuilder: (context, index) {
-                final image = filteredImages[index];
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => FullScreenImageGallery(
-                          images: images,
-                          initialIndex: index,
-                          onRatingUpdate: (rating) {
-                            setState(() {
-                              images[index]['rating'] = rating;
-                            });
-                          },
-                        ),
-                      ),
-                    );
-                  },
-                  child: Stack(
-                    alignment: Alignment.bottomCenter,
-                    children: [
-                      Image.network(
-                        image['url'],
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                      ),
-                      Container(
-                        color: Colors.black.withOpacity(0.5),
-                        padding: const EdgeInsets.all(5),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+        ),
+        Slider(
+          value: ratingFilter,
+          min: 0,
+          max: 5,
+          divisions: 5,
+          label: 'Filter by Rating: ${ratingFilter.toStringAsFixed(1)}',
+          onChanged: (value) {
+            setState(() {
+              ratingFilter = value;
+            });
+            filterImages();
+          },
+        ),
+        Expanded(
+          child: isLoading
+              ? const Center(child: CircularProgressIndicator())
+              : GridView.builder(
+                  padding: const EdgeInsets.all(10),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+                  itemCount: filteredImages.length,
+                  itemBuilder: (context, index) {
+                    final image = filteredImages[index];
+                    return Tooltip(
+                      message: image['description'] ?? 'No description available',
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => FullScreenImageGallery(
+                                images: filteredImages,
+                                initialIndex: index,
+                                onRatingUpdate: (rating) {
+                                  setState(() {
+                                    images[images.indexOf(image)]['rating'] = rating;
+                                    filterImages();
+                                  });
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                        child: Stack(
+                          alignment: Alignment.bottomCenter,
                           children: [
-                            const Icon(Icons.star, color: Colors.amber, size: 16),
-                            const SizedBox(width: 5),
-                            Text(
-                              image['rating'].toStringAsFixed(1),
-                              style: const TextStyle(color: Colors.white),
+                            Image.network(
+                              image['url'],
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              height: double.infinity,
+                            ),
+                            Container(
+                              color: Colors.black.withOpacity(0.5),
+                              padding: const EdgeInsets.all(5),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(Icons.star, color: Colors.amber, size: 16),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    image['rating'].toStringAsFixed(1),
+                                    style: const TextStyle(color: Colors.white),
+                                  ),
+                                ],
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+                    );
+                  },
+                ),
+        ),
+      ],
+    ),
+  );
 }
+}
+
+
 
 class FullScreenImageGallery extends StatefulWidget {
   final List<Map<String, dynamic>> images;
@@ -237,11 +285,16 @@ class _FullScreenImageGalleryState extends State<FullScreenImageGallery> {
             padding: const EdgeInsets.all(10.0),
             child: Column(
               children: [
-                const Text(
-                  'Rate this Image',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                Text(
+                  widget.images[currentIndex]['title'],
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 10),
+                const Text('Rate this Image'),
                 RatingBar.builder(
                   initialRating: widget.images[currentIndex]['rating'],
                   minRating: 0,
@@ -267,3 +320,4 @@ class _FullScreenImageGalleryState extends State<FullScreenImageGallery> {
     );
   }
 }
+
